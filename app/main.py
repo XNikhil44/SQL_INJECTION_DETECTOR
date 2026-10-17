@@ -39,7 +39,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db.init_db()
+    try:
+        db.init_db()
+    except Exception as e:  # history is optional: never stop detection because of the DB
+        print(f"[warn] database unavailable, history disabled: {type(e).__name__}: {e}")
     yield
 
 
@@ -83,9 +86,12 @@ async def _run(payload: str, mode: str, source: str) -> AnalyzeResponse:
         ai_verdict, ai_error = await ai.classify(payload, [m.rule_id for m in res.matches])
         ai_used = ai_verdict is not None
         res = combine_with_ai(res, ai_verdict)
-    row_id = db.save_detection(
-        source, payload, res.score, res.verdict, [m.rule_id for m in res.matches], ai_used
-    )
+    try:
+        row_id = db.save_detection(
+            source, payload, res.score, res.verdict, [m.rule_id for m in res.matches], ai_used
+        )
+    except Exception:
+        row_id = None
     return _to_response(res, ai_verdict, ai_error, ai_used, row_id)
 
 
@@ -135,18 +141,27 @@ async def scan(req: ScanRequest):
     except Exception as e:  # keep the real reason visible in the UI instead of a bare 500
         raise HTTPException(500, f"Scan failed: {type(e).__name__}: {e}")
     result = {"target": target, "ports": ports, "hosts": hosts}
-    db.save_scan(target, result)
+    try:
+        db.save_scan(target, result)
+    except Exception:
+        pass
     return result
 
 
 @app.get("/api/history", dependencies=[Depends(guard)])
 async def get_history(limit: int = 50):
-    return db.history(max(1, min(limit, 200)))
+    try:
+        return db.history(max(1, min(limit, 200)))
+    except Exception:
+        return []
 
 
 @app.get("/api/stats", dependencies=[Depends(guard)])
 async def get_stats():
-    return db.stats()
+    try:
+        return db.stats()
+    except Exception:
+        return {"total_checks": 0, "by_verdict": {}, "scans_run": 0}
 
 
 @app.get("/", include_in_schema=False)

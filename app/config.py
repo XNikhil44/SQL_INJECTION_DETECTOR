@@ -18,12 +18,18 @@ class Settings:
     rate_limit_per_min: int
 
 
-def _default_db_path() -> str:
-    """Local: ./sqli_detector.db. On Vercel / read-only hosts only the temp dir is writable
-    (temporary and per instance, so history resets on cold start)."""
-    if os.getenv("VERCEL") or not os.access(os.getcwd(), os.W_OK):
-        return os.path.join(tempfile.gettempdir(), "sqli_detector.db")
-    return "sqli_detector.db"
+def _resolve_db_path() -> str:
+    """Local: ./sqli_detector.db (or DB_PATH). On Vercel / read-only hosts only the temp dir
+    is writable, so any path outside it is moved there (temporary, per instance: history
+    resets on cold start). This also fixes a DB_PATH copied from .env.example."""
+    path = os.getenv("DB_PATH") or "sqli_detector.db"
+    absolute = os.path.abspath(path)
+    tmp = os.path.realpath(tempfile.gettempdir())
+    in_tmp = os.path.realpath(absolute).startswith(tmp + os.sep)
+    unwritable = not os.access(os.path.dirname(absolute), os.W_OK)
+    if unwritable or (os.getenv("VERCEL") and not in_tmp):
+        return os.path.join(tmp, os.path.basename(path))
+    return path
 
 
 def get_settings() -> Settings:
@@ -32,7 +38,7 @@ def get_settings() -> Settings:
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         gemini_timeout=float(os.getenv("GEMINI_TIMEOUT", "15")),
-        db_path=os.getenv("DB_PATH") or _default_db_path(),
+        db_path=_resolve_db_path(),
         api_key=os.getenv("API_KEY", ""),
         allow_public_scan=os.getenv("ALLOW_PUBLIC_SCAN", "false").lower() == "true",
         rate_limit_per_min=int(os.getenv("RATE_LIMIT_PER_MIN", "60")),

@@ -82,3 +82,14 @@ def test_rate_limit(client, monkeypatch):
 
 def test_ui_served(client):
     assert "SQLi Detector" in client.get("/").text
+
+
+def test_db_failure_does_not_break_detection(client, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("disk is read-only")
+
+    monkeypatch.setattr("app.db.save_detection", boom)
+    monkeypatch.setattr("app.db.history", boom)
+    r = client.post("/api/analyze", json={"payload": "1 UNION SELECT 1,2", "ai": "never"})
+    assert r.status_code == 200 and r.json()["verdict"] == "malicious" and r.json()["id"] is None
+    assert client.get("/api/history").json() == []
