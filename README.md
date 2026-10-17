@@ -7,7 +7,7 @@ Python/FastAPI backend that detects SQL injection attempts in user input and web
 ```
 input ──► normalize (URL/HTML decode, comment strip, NFKC) ──► 17 signature rules ──► noisy-OR score 0-100
                                                                       │
-                                         score is "unsure" (15-69)? ──┴─► Gemini classifier (optional)
+                                         score is "unsure" (15-69)? ──┴─► AI classifier (optional)
                                                                               │
                                               AI can raise the score freely, but can only lower
                                               it slightly and never below "malicious" ──► final verdict
@@ -24,7 +24,7 @@ input ──► normalize (URL/HTML decode, comment strip, NFKC) ──► 17 si
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env                                 # add GEMINI_API_KEY
+cp .env.example .env                                 # add API_KEY
 # nmap (only for the Network scan tab):
 #   Ubuntu/Debian: sudo apt install nmap     macOS: brew install nmap     Windows: nmap.org/download
 uvicorn app.main:app --reload
@@ -32,7 +32,6 @@ uvicorn app.main:app --reload
 
 Open http://127.0.0.1:8000 for the UI, http://127.0.0.1:8000/docs for the API docs.
 
-Get a free Gemini key at https://aistudio.google.com/apikey. `GEMINI_MODEL` defaults to `gemini-2.5-flash`; change it in `.env` if Google renames models.
 
 ## API
 
@@ -58,7 +57,7 @@ Set `API_KEY` in `.env` to require an `X-API-Key` header. Requests are rate limi
 app/
   main.py            FastAPI routes, auth + rate limit
   detector/          normalize.py, rules.py, engine.py
-  ai.py              Gemini REST client + prompt-injection-aware prompt
+  ai.py              REST client + prompt-injection-aware prompt
   scanner.py         target validation, nmap runner, XML parser
   logparser.py       access-log analysis
   db.py              SQLite history
