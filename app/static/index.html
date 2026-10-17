@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQLi Detector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#0a0b14; --panel:rgba(22,19,42,.62); --line:rgba(167,139,250,.17);
+    --text:#ece9fb; --mute:#8f8bb0; --uv:#a78bfa; --uv-deep:#7c3aed;
+    --clean:#5eead4; --low:#a3e635; --warn:#fbbf24; --bad:#ff4d6d;
+    --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+    --mono:"JetBrains Mono", ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--ink); color:var(--text); }
+  body { font:15px/1.55 var(--display); -webkit-font-smoothing:antialiased; overflow-x:hidden; }
+  button, input, textarea, select { font:inherit; color:inherit; }
+  :focus-visible { outline:2px solid var(--uv); outline-offset:2px; }
+
+  /* ---------- background layers ---------- */
+  #bg { position:fixed; inset:0; z-index:0; width:100%; height:100%; }
+  .orbs, .grid, .spot { position:fixed; inset:0; pointer-events:none; z-index:1; }
+  .orb { position:absolute; border-radius:50%; filter:blur(90px); opacity:.34; will-change:transform; }
+  .orb.a { width:520px; height:520px; background:#6d28d9; top:-140px; left:-120px; animation:drift1 26s ease-in-out infinite alternate; }
+  .orb.b { width:440px; height:440px; background:#be185d; bottom:-160px; right:-100px; opacity:.22; animation:drift2 32s ease-in-out infinite alternate; }
+  .orb.c { width:360px; height:360px; background:#0e7490; top:40%; left:55%; opacity:.18; animation:drift3 38s ease-in-out infinite alternate; }
+  @keyframes drift1 { to { transform:translate(220px,160px) scale(1.2); } }
+  @keyframes drift2 { to { transform:translate(-260px,-120px) scale(1.15); } }
+  @keyframes drift3 { to { transform:translate(-300px,120px) scale(.85); } }
+  .grid { background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+          background-size:56px 56px; opacity:.35;
+          -webkit-mask-image:radial-gradient(ellipse at 50% 30%,#000 0%,transparent 72%); mask-image:radial-gradient(ellipse at 50% 30%,#000 0%,transparent 72%); }
+  .spot { background:radial-gradient(520px circle at var(--mx,50%) var(--my,30%), rgba(167,139,250,.11), transparent 60%); }
+
+  /* ---------- layout ---------- */
+  #root { position:relative; z-index:2; }
+  .wrap { max-width:1000px; margin:0 auto; padding:0 18px 80px; }
+  header.top { display:flex; align-items:center; gap:14px; padding:26px 0 18px; flex-wrap:wrap; }
+  .logo { display:flex; align-items:center; gap:12px; }
+  .logo svg { width:38px; height:38px; filter:drop-shadow(0 0 10px rgba(167,139,250,.65)); }
+  .logo h1 { margin:0; font-size:26px; font-weight:800; letter-spacing:-.02em; }
+  .logo h1 span { position:relative; display:inline-block; }
+  .logo h1 span::before, .logo h1 span::after { content:attr(data-t); position:absolute; left:0; top:0; opacity:0; }
+  .logo h1:hover span::before { opacity:.8; color:#ff4d6d; transform:translate(-2px,1px); clip-path:inset(0 0 55% 0); animation:glitch .45s steps(2) 1; }
+  .logo h1:hover span::after { opacity:.8; color:#22d3ee; transform:translate(2px,-1px); clip-path:inset(55% 0 0 0); animation:glitch .45s steps(2) 1 reverse; }
+  @keyframes glitch { 0%{transform:translate(0)} 33%{transform:translate(-3px,1px)} 66%{transform:translate(3px,-1px)} 100%{transform:translate(0)} }
+  .grow { flex:1; }
+  .pill { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; padding:4px 11px; border:1px solid var(--line); border-radius:99px; color:var(--mute); background:rgba(10,11,20,.5); }
+  .pill i { width:7px; height:7px; border-radius:50%; background:#5b5878; }
+  .pill.on { color:var(--text); border-color:rgba(94,234,212,.4); }
+  .pill.on i { background:var(--clean); box-shadow:0 0 0 0 rgba(94,234,212,.7); animation:ping 2s infinite; }
+  @keyframes ping { 70% { box-shadow:0 0 0 8px rgba(94,234,212,0); } 100% { box-shadow:0 0 0 0 rgba(94,234,212,0); } }
+  .key { width:150px; background:rgba(10,11,20,.55); border:1px solid var(--line); border-radius:10px; padding:6px 10px; font-size:13px; }
+
+  /* tabs */
+  .tabs { position:relative; display:inline-flex; gap:2px; padding:4px; border:1px solid var(--line); border-radius:12px; background:rgba(10,11,20,.55); backdrop-filter:blur(8px); margin-bottom:18px; max-width:100%; overflow-x:auto; }
+  .tabs button { position:relative; z-index:1; background:none; border:0; padding:8px 16px; color:var(--mute); cursor:pointer; border-radius:9px; font-weight:600; white-space:nowrap; transition:color .2s; }
+  .tabs button.on, .tabs button:hover { color:var(--text); }
+  .tabs .ind { position:absolute; top:4px; bottom:4px; border-radius:9px; background:linear-gradient(135deg,rgba(124,58,237,.55),rgba(167,139,250,.25)); box-shadow:0 0 22px rgba(124,58,237,.4), inset 0 0 0 1px rgba(167,139,250,.35); transition:left .35s cubic-bezier(.3,1.3,.5,1), width .35s cubic-bezier(.3,1.3,.5,1); }
+
+  .page { animation:pageIn .4s ease both; }
+  @keyframes pageIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+
+  /* cards */
+  .card { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:18px; margin-bottom:14px; backdrop-filter:blur(14px); overflow:hidden; }
+  .card::before { content:""; position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .3s;
+                  background:radial-gradient(260px circle at var(--x,50%) var(--y,50%), rgba(167,139,250,.14), transparent 70%); }
+  .card:hover::before { opacity:1; }
+  .card > * { position:relative; }
+  h2 { margin:0 0 4px; font-size:20px; letter-spacing:-.01em; }
+  .sub { color:var(--mute); font-size:13.5px; margin:0 0 12px; max-width:68ch; }
+  .mute { color:var(--mute); font-size:13px; }
+
+  textarea, .field { width:100%; background:rgba(8,8,18,.7); border:1px solid var(--line); border-radius:10px; padding:11px 13px; font-family:var(--mono); font-size:13.5px; transition:border-color .2s, box-shadow .2s; }
+  textarea { min-height:120px; resize:vertical; display:block; }
+  textarea:focus, .field:focus { outline:none; border-color:var(--uv); box-shadow:0 0 0 3px rgba(167,139,250,.18); }
+  .taWrap { position:relative; border-radius:10px; overflow:hidden; }
+  .taWrap.scanning::after { content:""; position:absolute; left:0; right:0; height:46px; top:-46px; pointer-events:none;
+        background:linear-gradient(to bottom, transparent, rgba(167,139,250,.45), transparent); border-bottom:1px solid rgba(196,181,253,.9); animation:laser 1.1s linear infinite; }
+  @keyframes laser { to { transform:translateY(calc(100% * 4 + 120px)); } }
+
+  .row { display:flex; gap:10px; margin-top:12px; align-items:center; flex-wrap:wrap; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+  .chip { background:rgba(167,139,250,.07); border:1px solid var(--line); color:var(--text); padding:5px 11px; border-radius:99px; cursor:pointer; font-size:12.5px; display:inline-flex; gap:7px; align-items:center; transition:transform .15s, border-color .2s, background .2s; }
+  .chip:hover { transform:translateY(-2px); border-color:var(--uv); background:rgba(167,139,250,.15); }
+  .chip b { width:7px; height:7px; border-radius:50%; display:inline-block; }
+  select { background:rgba(8,8,18,.7); border:1px solid var(--line); border-radius:10px; padding:9px 12px; }
+  .btn { position:relative; overflow:hidden; border:0; cursor:pointer; padding:10px 22px; border-radius:11px; font-weight:700; color:#fff;
+         background:linear-gradient(135deg,#7c3aed,#a78bfa); box-shadow:0 6px 24px rgba(124,58,237,.45); transition:transform .15s, box-shadow .2s; }
+  .btn:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 10px 30px rgba(124,58,237,.6); }
+  .btn:active:not(:disabled) { transform:translateY(0) scale(.98); }
+  .btn:disabled { opacity:.65; cursor:progress; }
+  .btn::after { content:""; position:absolute; inset:0; background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.35) 50%,transparent 70%); transform:translateX(-120%); }
+  .btn.busy::after { animation:shine 1s infinite; }
+  @keyframes shine { to { transform:translateX(120%); } }
+  .hint { font-size:12px; color:var(--mute); }
+  kbd { font-family:var(--mono); font-size:11px; border:1px solid var(--line); border-radius:5px; padding:1px 5px; }
+
+  /* verdict + gauge */
+  .verdict { display:flex; gap:22px; align-items:center; flex-wrap:wrap; }
+  .gauge { position:relative; width:150px; height:150px; flex:none; }
+  .gauge svg { width:100%; height:100%; transform:rotate(-90deg); }
+  .gauge circle { fill:none; stroke-width:9; }
+  .g-bg { stroke:rgba(167,139,250,.13); }
+  .g-fg { stroke-linecap:round; filter:drop-shadow(0 0 7px currentColor); transition:stroke .4s; }
+  .g-num { position:absolute; inset:0; display:grid; place-content:center; text-align:center; font-weight:800; font-size:40px; line-height:1; }
+  .g-num small { display:block; font-size:12px; font-weight:400; color:var(--mute); margin-top:4px; }
+  .vbadge { display:inline-flex; align-items:center; gap:9px; font-size:26px; font-weight:800; letter-spacing:-.02em; }
+  .vbadge i { width:14px; height:14px; border-radius:50%; background:currentColor; box-shadow:0 0 18px currentColor; animation:beat 1.6s ease-in-out infinite; }
+  @keyframes beat { 50% { transform:scale(1.35); opacity:.7; } }
+  .shake { animation:shake .5s ease; }
+  @keyframes shake { 20%,60% { transform:translateX(-6px); } 40%,80% { transform:translateX(6px); } }
+  .flash { position:absolute; inset:0; pointer-events:none; border-radius:16px; animation:flash 1.2s ease-out forwards; }
+  @keyframes flash { from { box-shadow:inset 0 0 70px var(--fc); } to { box-shadow:inset 0 0 0 transparent; } }
+
+  /* the autopsy */
+  .autopsy { font-family:var(--mono); font-size:14.5px; line-height:1.9; padding:14px 16px; border-radius:12px; background:rgba(5,5,12,.75); border:1px solid var(--line); word-break:break-all; margin:16px 0 4px; }
+  .autopsy mark { color:#fff; padding:2px 4px; margin:0 -1px; border-radius:4px; background:rgba(255,77,109,.18); box-shadow:0 0 0 1px rgba(255,77,109,.45);
+                  animation:uv .9s ease both; animation-delay:var(--d); transition:background .2s, box-shadow .2s; }
+  .autopsy mark.hot { background:rgba(255,77,109,.55); box-shadow:0 0 0 1px #ff4d6d, 0 0 20px rgba(255,77,109,.75); }
+  @keyframes uv { 0% { background:transparent; box-shadow:none; color:inherit; } 45% { box-shadow:0 0 28px 6px rgba(255,77,109,.9); } 100% { } }
+  .caret { display:inline-block; width:8px; height:1.05em; background:var(--uv); vertical-align:-3px; animation:blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  /* rule rows */
+  .rules { display:grid; gap:6px; margin-top:10px; }
+  .rule { display:grid; grid-template-columns:1fr 110px 46px; gap:12px; align-items:center; padding:9px 12px; border-radius:10px; border:1px solid transparent; background:rgba(8,8,18,.45); cursor:default; animation:ruleIn .4s ease both; animation-delay:var(--d); transition:border-color .2s, background .2s; }
+  .rule:hover { border-color:rgba(255,77,109,.5); background:rgba(255,77,109,.07); }
+  @keyframes ruleIn { from { opacity:0; transform:translateX(-12px); } }
+  .rule b { font-weight:600; }
+  .rule small { display:block; color:var(--mute); font-size:12px; }
+  .rule .w { text-align:right; font-family:var(--mono); font-size:13px; }
+  .meter { height:6px; border-radius:9px; background:rgba(167,139,250,.14); overflow:hidden; }
+  .meter > div { height:100%; border-radius:9px; background:linear-gradient(90deg,var(--uv),var(--bad)); transition:width .9s cubic-bezier(.2,.8,.2,1); }
+
+  .aihead { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .tag { font-size:12.5px; padding:3px 10px; border-radius:99px; border:1px solid var(--line); background:rgba(167,139,250,.08); }
+  .fix { border-left:3px solid var(--clean); padding:2px 12px; margin-top:10px; color:#c9f7ef; }
+
+  /* stats */
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:14px; }
+  .stat { padding:14px 16px; border-radius:14px; border:1px solid var(--line); background:var(--panel); backdrop-filter:blur(12px); animation:pageIn .5s ease both; animation-delay:var(--d,0s); }
+  .stat strong { display:block; font-size:34px; font-weight:800; line-height:1.1; }
+  .stat span { color:var(--mute); font-size:13px; }
+  .hbar { display:grid; grid-template-columns:130px 1fr 34px; gap:10px; align-items:center; margin:7px 0; font-size:13.5px; }
+  .hbar .t { height:9px; border-radius:9px; background:rgba(167,139,250,.12); overflow:hidden; }
+  .hbar .t > div { height:100%; border-radius:9px; transition:width 1s cubic-bezier(.2,.8,.2,1); }
+
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th { text-align:left; color:var(--mute); font-weight:600; padding:7px 9px; border-bottom:1px solid var(--line); }
+  td { padding:8px 9px; border-bottom:1px solid rgba(167,139,250,.08); vertical-align:top; word-break:break-word; }
+  tr.fade { animation:ruleIn .4s ease both; animation-delay:var(--d); }
+  code { font-family:var(--mono); font-size:12.5px; color:#ffb4c2; }
+  .tablewrap { overflow-x:auto; }
+
+  /* switch */
+  .switch { display:inline-flex; gap:10px; align-items:center; cursor:pointer; color:var(--mute); font-size:13.5px; user-select:none; }
+  .switch input { position:absolute; opacity:0; }
+  .switch .tr { width:40px; height:22px; border-radius:99px; background:rgba(167,139,250,.15); border:1px solid var(--line); position:relative; transition:background .25s; flex:none; }
+  .switch .tr::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#9a96bd; transition:transform .3s cubic-bezier(.3,1.5,.5,1), background .2s; }
+  .switch input:checked + .tr { background:rgba(124,58,237,.5); }
+  .switch input:checked + .tr::after { transform:translateX(18px); background:#fff; }
+  .switch input:focus-visible + .tr { outline:2px solid var(--uv); outline-offset:2px; }
+
+  /* radar */
+  .radarBox { display:flex; gap:20px; align-items:center; flex-wrap:wrap; }
+  .radar { position:relative; width:190px; height:190px; border-radius:50%; flex:none; border:1px solid var(--line); background:radial-gradient(circle,rgba(124,58,237,.14),transparent 70%); }
+  .radar::before, .radar::after { content:""; position:absolute; border-radius:50%; border:1px solid var(--line); inset:25%; }
+  .radar::after { inset:46%; }
+  .sweep { position:absolute; inset:0; border-radius:50%; background:conic-gradient(from 0deg, rgba(167,139,250,0) 0 70%, rgba(167,139,250,.6) 100%); animation:spin 2.2s linear infinite; }
+  .blip { position:absolute; width:8px; height:8px; border-radius:50%; background:var(--clean); box-shadow:0 0 12px var(--clean); animation:blip 2.2s ease-out infinite; opacity:0; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @keyframes blip { 0%,18% { opacity:1; transform:scale(1.5); } 100% { opacity:0; transform:scale(.6); } }
+  .host { animation:pageIn .5s ease both; animation-delay:var(--d); }
+  .port { display:inline-flex; gap:8px; align-items:center; padding:6px 11px; margin:4px 6px 4px 0; border-radius:10px; border:1px solid var(--line); background:rgba(8,8,18,.55); font-size:13px; }
+  .port.web { border-color:rgba(94,234,212,.5); box-shadow:0 0 16px rgba(94,234,212,.18); }
+  .port em { font-style:normal; font-family:var(--mono); color:var(--uv); }
+
+  /* toasts */
+  .toasts { position:fixed; right:16px; bottom:16px; z-index:20; display:grid; gap:10px; max-width:min(420px, calc(100vw - 32px)); }
+  .toast { padding:12px 16px; border-radius:12px; background:rgba(30,12,22,.95); border:1px solid rgba(255,77,109,.55); box-shadow:0 10px 40px rgba(0,0,0,.5); animation:toastIn .4s cubic-bezier(.3,1.4,.5,1) both; font-size:14px; }
+  @keyframes toastIn { from { opacity:0; transform:translateX(60px); } }
+
+  .empty { text-align:center; padding:26px 10px; color:var(--mute); }
+
+  @media (max-width:600px) {
+    .rule { grid-template-columns:1fr 40px; } .rule .meter { display:none; }
+    .hbar { grid-template-columns:90px 1fr 30px; }
+    .key { width:110px; }
+  }
+  @media (prefers-reduced-motion:reduce) {
+    *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+  }
+</style>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="orbs" aria-hidden="true"><div class="orb a"></div><div class="orb b"></div><div class="orb c"></div></div>
+<div class="grid" aria-hidden="true"></div>
+<div class="spot" id="spot" aria-hidden="true"></div>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useLayoutEffect, useRef } = React;
+
+/* ---------- constants ---------- */
+const VERDICT = {
+  clean:      { label: "Clean",      color: "#5eead4", rgb: [94, 234, 212] },
+  low_risk:   { label: "Low risk",   color: "#a3e635", rgb: [163, 230, 53] },
+  suspicious: { label: "Suspicious", color: "#fbbf24", rgb: [251, 191, 36] },
+  malicious:  { label: "Malicious",  color: "#ff4d6d", rgb: [255, 77, 109] },
+};
+const IDLE_RGB = [139, 92, 246];
+
+const EXAMPLES = [
+  { t: "' OR '1'='1' --", label: "Login bypass", v: "malicious" },
+  { t: "1 UNION SELECT username,password FROM users", label: "Union extraction", v: "malicious" },
+  { t: "1; DROP TABLE users;--", label: "Stacked query", v: "malicious" },
+  { t: "1%2527%2520OR%25201%253D1", label: "Double-encoded", v: "malicious" },
+  { t: "x' OR ''='", label: "Subtle one", v: "low_risk" },
+  { t: "O'Brien", label: "Harmless name", v: "clean" },
+];
+
+const SAMPLE_LOG = `192.168.1.20 - - [17/Oct/2026:02:20:01 +0530] "GET /products?id=1%20UNION%20SELECT%20username,password%20FROM%20users HTTP/1.1" 500 312
+192.168.1.20 - - [17/Oct/2026:02:20:05 +0530] "GET /login?user=admin%27%20OR%20%271%27%3D%271%27%20-- HTTP/1.1" 200 1024
+192.168.1.20 - - [17/Oct/2026:02:20:09 +0530] "GET /item?id=1%20AND%20SLEEP(5) HTTP/1.1" 200 88
+10.0.0.7 - - [17/Oct/2026:02:21:11 +0530] "GET /search?q=1;DROP%20TABLE%20users;-- HTTP/1.1" 500 410
+10.0.0.8 - - [17/Oct/2026:02:22:00 +0530] "GET /home HTTP/1.1" 200 5120
+10.0.0.8 - - [17/Oct/2026:02:22:03 +0530] "GET /search?q=blue+shoes HTTP/1.1" 200 2048
+10.0.0.9 - - [17/Oct/2026:02:22:30 +0530] "GET /profile?name=O%27Brien HTTP/1.1" 200 900`;
+
+/* ---------- api ---------- */
+async function api(path, body, key) {
+  const headers = { "Content-Type": "application/json" };
+  if (key) headers["X-API-Key"] = key;
+  const r = await fetch(path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined });
+  let data = {};
+  try { data = await r.json(); } catch (e) { /* non-json error body */ }
+  if (!r.ok) {
+    let d = data.detail;
+    if (Array.isArray(d)) d = d.map((x) => x.msg).join("; ");
+    throw new Error(d || "Request failed (HTTP " + r.status + ")");
+  }
+  return data;
+}
+
+/* ---------- hooks ---------- */
+function useCountUp(target, ms = 1000) {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    let raf, start;
+    const step = (t) => {
+      if (start === undefined) start = t;
+      const p = Math.min(1, (t - start) / ms);
+      setV(Math.round(target * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
+  return v;
+}
+
+function useTypewriter(text, perTick = 2, every = 16) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    setN(0);
+    if (!text) return;
+    let i = 0;
+    const id = setInterval(() => { i += perTick; setN(i); if (i >= text.length) clearInterval(id); }, every);
+    return () => clearInterval(id);
+  }, [text]);
+  return { shown: text.slice(0, n), done: n >= text.length };
+}
+
+function useMounted(delay = 60) {
+  const [on, setOn] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setOn(true), delay); return () => clearTimeout(t); }, []);
+  return on;
+}
+
+/* ---------- background: falling SQL, tinted by threat level ---------- */
+function Background({ threat }) {
+  const target = useRef(IDLE_RGB);
+  useEffect(() => { target.current = (VERDICT[threat] && VERDICT[threat].rgb) || IDLE_RGB; }, [threat]);
+
+  useEffect(() => {
+    const c = document.getElementById("bg");
+    const ctx = c.getContext("2d");
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const size = 17;
+    const stream = "SELECT*FROM users WHERE id=1 UNION ALL DROP TABLE OR 1=1 ';-- 0x41 SLEEP(5) admin'-- INSERT INTO";
+    let w, h, drops, speeds, cur = IDLE_RGB.slice(), raf, last = 0;
+
+    function resize() {
+      w = c.width = window.innerWidth; h = c.height = window.innerHeight;
+      const cols = Math.ceil(w / size);
+      drops = Array.from({ length: cols }, () => Math.random() * -h / size);
+      speeds = Array.from({ length: cols }, () => 0.35 + Math.random() * 0.8);
+      ctx.fillStyle = "#0a0b14"; ctx.fillRect(0, 0, w, h);
+    }
+    resize();
+    window.addEventListener("resize", resize);
+
+    function frame(t) {
+      raf = requestAnimationFrame(frame);
+      if (t - last < 45) return;           // ~22fps is plenty for a backdrop
+      last = t;
+      for (let k = 0; k < 3; k++) cur[k] += (target.current[k] - cur[k]) * 0.06;
+      ctx.fillStyle = "rgba(10,11,20,0.10)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.font = size + "px 'JetBrains Mono', monospace";
+      for (let i = 0; i < drops.length; i++) {
+        const y = drops[i] * size;
+        const ch = stream[(i * 7 + Math.floor(drops[i])) % stream.length];
+        ctx.fillStyle = "rgba(" + (cur[0] | 0) + "," + (cur[1] | 0) + "," + (cur[2] | 0) + ",0.34)";
+        ctx.fillText(ch, i * size, y);
+        ctx.fillStyle = "rgba(255,255,255,0.42)";
+        ctx.fillText(ch, i * size, y + size * 0.02);
+        drops[i] += speeds[i];
+        if (y > h && Math.random() > 0.975) drops[i] = Math.random() * -20;
+      }
+    }
+    if (!reduce) raf = requestAnimationFrame(frame);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); };
+  }, []);
+
+  useEffect(() => {
+    const spot = document.getElementById("spot");
+    const move = (e) => { spot.style.setProperty("--mx", e.clientX + "px"); spot.style.setProperty("--my", e.clientY + "px"); };
+    window.addEventListener("pointermove", move);
+    return () => window.removeEventListener("pointermove", move);
+  }, []);
+  return null;
+}
+
+/* ---------- small components ---------- */
+function Card({ children, className = "", style }) {
+  const onMove = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    e.currentTarget.style.setProperty("--x", e.clientX - r.left + "px");
+    e.currentTarget.style.setProperty("--y", e.clientY - r.top + "px");
+  };
+  return <div className={"card " + className} style={style} onMouseMove={onMove}>{children}</div>;
+}
+
+function Tabs({ tabs, value, onChange }) {
+  const refs = useRef({});
+  const [ind, setInd] = useState({ left: 4, width: 0 });
+  const measure = () => { const el = refs.current[value]; if (el) setInd({ left: el.offsetLeft, width: el.offsetWidth }); };
+  useLayoutEffect(measure, [value]);
+  useEffect(() => {
+    window.addEventListener("resize", measure);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [value]);
+  return (
+    <div className="tabs" role="tablist">
+      <div className="ind" style={{ left: ind.left, width: ind.width }} />
+      {tabs.map((t) => (
+        <button key={t.id} role="tab" aria-selected={value === t.id} className={value === t.id ? "on" : ""}
+          ref={(el) => (refs.current[t.id] = el)} onClick={() => onChange(t.id)}>{t.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function Gauge({ score, color }) {
+  const v = useCountUp(score, 1100);
+  const R = 62, C = 2 * Math.PI * R;
+  return (
+    <div className="gauge" role="img" aria-label={"Risk score " + score + " out of 100"}>
+      <svg viewBox="0 0 150 150">
+        <circle className="g-bg" cx="75" cy="75" r={R} />
+        <circle className="g-fg" cx="75" cy="75" r={R} stroke={color} style={{ color }} strokeDasharray={C} strokeDashoffset={C * (1 - v / 100)} />
+      </svg>
+      <div className="g-num" style={{ color }}>{v}<small>risk score</small></div>
+    </div>
+  );
+}
+
+function Stat({ label, value, color, delay = 0 }) {
+  const v = useCountUp(value, 900);
+  return (
+    <div className="stat" style={{ "--d": delay + "s" }}>
+      <strong style={{ color }}>{v}</strong><span>{label}</span>
+    </div>
+  );
+}
+
+function HBar({ label, value, max, color }) {
+  const on = useMounted();
+  return (
+    <div className="hbar">
+      <span>{label}</span>
+      <div className="t"><div style={{ width: on ? (max ? (value / max) * 100 : 0) + "%" : "0%", background: color || "linear-gradient(90deg,#7c3aed,#a78bfa)" }} /></div>
+      <b style={{ textAlign: "right" }}>{value}</b>
+    </div>
+  );
+}
+
+function Radar() {
+  const blips = [[30, 24], [68, 40], [44, 70], [76, 72], [22, 58]];
+  return (
+    <div className="radar" aria-hidden="true">
+      <div className="sweep" />
+      {blips.map((b, i) => <span key={i} className="blip" style={{ left: b[0] + "%", top: b[1] + "%", animationDelay: (i * 0.45) + "s" }} />)}
+    </div>
+  );
+}
+
+/* highlights matched evidence inside the decoded payload; hovering a rule row lights its span */
+function Autopsy({ text, matches, active }) {
+  const { shown, done } = useTypewriter(text);
+  const low = text.toLowerCase();
+  const ranges = [];
+  matches.forEach((m) => {
+    const ev = m.evidence.toLowerCase();
+    const i = ev ? low.indexOf(ev) : -1;
+    if (i >= 0) ranges.push({ s: i, e: i + ev.length, ids: [m.rule_id] });
+  });
+  ranges.sort((a, b) => a.s - b.s);
+  const merged = [];
+  ranges.forEach((r) => {
+    const last = merged[merged.length - 1];
+    if (last && r.s <= last.e) { last.e = Math.max(last.e, r.e); last.ids.push(...r.ids); }
+    else merged.push({ ...r });
+  });
+  const parts = [];
+  let pos = 0;
+  merged.forEach((r, i) => {
+    if (r.s > pos) parts.push(<span key={"t" + i}>{text.slice(pos, r.s)}</span>);
+    parts.push(<mark key={"m" + i} className={active && r.ids.includes(active) ? "hot" : ""} style={{ "--d": 0.5 + i * 0.25 + "s" }}>{text.slice(r.s, r.e)}</mark>);
+    pos = r.e;
+  });
+  if (pos < text.length) parts.push(<span key="tail">{text.slice(pos)}</span>);
+  return (
+    <div className="autopsy" aria-label="Decoded payload with matched parts highlighted">
+      {done ? parts : shown}{!done && <span className="caret" />}
+    </div>
+  );
+}
+
+/* ---------- tabs ---------- */
+function AnalyzeTab({ call, setThreat }) {
+  const [payload, setPayload] = useState("");
+  const [mode, setMode] = useState("auto");
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState(null);
+  const [runId, setRunId] = useState(0);
+  const [active, setActive] = useState(null);
+
+  const run = async () => {
+    if (!payload.trim() || busy) return;
+    setBusy(true);
+    try {
+      const d = await call("/api/analyze", { payload, ai: mode });
+      await new Promise((r) => setTimeout(r, 450)); // let the scan beam play at least once
+      setRes(d); setRunId((n) => n + 1); setThreat(d.verdict);
+    } catch (e) { /* toast shown by call() */ }
+    finally { setBusy(false); }
+  };
+  const onKey = (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") run(); };
+
+  const v = res && VERDICT[res.verdict];
+  return (
+    <div className="page">
+      <Card>
+        <h2>Check an input</h2>
+        <p className="sub">Paste a form value, URL parameter or query string. It is decoded first, so encoded payloads can't hide.</p>
+        <div className={"taWrap" + (busy ? " scanning" : "")}>
+          <textarea value={payload} onChange={(e) => setPayload(e.target.value)} onKeyDown={onKey} placeholder="' OR '1'='1' --" aria-label="Input to check" />
+        </div>
+        <div className="chips">
+          <span className="mute">Try</span>
+          {EXAMPLES.map((x) => (
+            <button key={x.t} className="chip" onClick={() => setPayload(x.t)} title={x.t}>
+              <b style={{ background: VERDICT[x.v].color }} />{x.label}
+            </button>
+          ))}
+        </div>
+        <div className="row">
+          <select value={mode} onChange={(e) => setMode(e.target.value)} aria-label="AI mode">
+            <option value="auto">AI: only when unsure</option>
+            <option value="always">AI: always</option>
+            <option value="never">AI: never</option>
+          </select>
+          <button className={"btn" + (busy ? " busy" : "")} onClick={run} disabled={busy || !payload.trim()}>{busy ? "Analyzing" : "Analyze"}</button>
+          <span className="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
+        </div>
+      </Card>
+
+      {res && (
+        <div key={runId}>
+          <Card className={res.verdict === "malicious" ? "shake" : ""}>
+            <div className="flash" style={{ "--fc": v.color + "88" }} />
+            <div className="verdict">
+              <Gauge score={res.score} color={v.color} />
+              <div>
+                <div className="vbadge" style={{ color: v.color }}><i />{v.label}</div>
+                <p className="sub" style={{ margin: "6px 0 0" }}>
+                  {res.matches.length ? res.matches.length + " rule" + (res.matches.length > 1 ? "s" : "") + " matched." : "No attack signatures matched."}
+                  {res.ai_used ? " AI reviewed it." : ""}
+                </p>
+              </div>
+            </div>
+            <Autopsy text={res.normalized} matches={res.matches} active={active} />
+            {res.matches.length > 0 && <p className="hint" style={{ margin: "2px 2px 0" }}>Hover a rule to see where it matched.</p>}
+            <div className="rules">
+              {res.matches.map((m, i) => (
+                <div key={m.rule_id} className="rule" style={{ "--d": 0.15 + i * 0.09 + "s" }}
+                  onMouseEnter={() => setActive(m.rule_id)} onMouseLeave={() => setActive(null)}>
+                  <div><b>{m.name}</b><small>{m.rule_id} · {m.category}</small></div>
+                  <div className="meter"><div style={{ width: m.weight + "%" }} /></div>
+                  <div className="w">{m.weight}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {res.ai && (
+            <Card>
+              <div className="aihead">
+                <b style={{ fontSize: 17 }}>AI says: {res.ai.is_injection ? "injection attempt" : "looks harmless"}</b>
+                <span className="tag">{Math.round(res.ai.confidence * 100)}% sure</span>
+                <span className="tag">{res.ai.attack_type}</span>
+              </div>
+              <p>{res.ai.explanation}</p>
+              {res.ai.safe_fix && <div className="fix">{res.ai.safe_fix}</div>}
+            </Card>
+          )}
+          {res.ai_error && <p className="mute">AI was skipped: {res.ai_error.replace(/Gemini/g, "AI")}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LogsTab({ call, setThreat }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [d, setD] = useState(null);
+  const run = async () => {
+    setBusy(true);
+    try { const r = await call("/api/logs/analyze", { log_text: text }); setD(r); setThreat(r.flagged ? "suspicious" : "clean"); }
+    catch (e) { /* toast */ }
+    finally { setBusy(false); }
+  };
+  const maxIp = d && d.top_ips.length ? d.top_ips[0][1] : 0;
+  const maxRule = d && d.top_rules.length ? d.top_rules[0][1] : 0;
+  return (
+    <div className="page">
+      <Card>
+        <h2>Scan a server log</h2>
+        <p className="sub">Paste Apache or Nginx access log lines. This uses the rules only, so it never uses your AI quota.</p>
+        <div className={"taWrap" + (busy ? " scanning" : "")}>
+          <textarea style={{ minHeight: 150 }} value={text} onChange={(e) => setText(e.target.value)} placeholder="127.0.0.1 - - [10/Oct/2026:13:55:36 +0530] &quot;GET /item?id=1 UNION SELECT 1,2 HTTP/1.1&quot; 500 123" aria-label="Access log" />
+        </div>
+        <div className="row">
+          <button className={"btn" + (busy ? " busy" : "")} onClick={run} disabled={busy || !text.trim()}>{busy ? "Reading logs" : "Scan logs"}</button>
+          <button className="chip" onClick={() => setText(SAMPLE_LOG)}>Load a sample log</button>
+        </div>
+      </Card>
+      {d && (
+        <div className="page">
+          <div className="stats">
+            <Stat label="lines read" value={d.lines_analyzed} delay={0} />
+            <Stat label="flagged" value={d.flagged} color="#ff4d6d" delay={0.08} />
+            <Stat label="needing a look (5xx)" value={d.investigate_first.length} color="#fbbf24" delay={0.16} />
+            <Stat label="source IPs" value={d.top_ips.length} delay={0.24} />
+          </div>
+          {d.flagged === 0 && <Card><div className="empty">Nothing suspicious in these lines.</div></Card>}
+          {d.top_ips.length > 0 && (
+            <Card>
+              <h2>Who sent them</h2>
+              {d.top_ips.map(([ip, n]) => <HBar key={ip} label={ip} value={n} max={maxIp} />)}
+              <h2 style={{ marginTop: 18 }}>Which rules fired</h2>
+              {d.top_rules.map(([r, n]) => <HBar key={r} label={r} value={n} max={maxRule} color="linear-gradient(90deg,#be185d,#ff4d6d)" />)}
+            </Card>
+          )}
+          {d.investigate_first.length > 0 && (
+            <Card>
+              <h2>Check these first</h2>
+              <p className="sub">The server answered with an error, so the payload may have reached the database.</p>
+              <div className="tablewrap"><table><thead><tr><th>IP</th><th>Status</th><th>Request</th></tr></thead><tbody>
+                {d.investigate_first.map((f, i) => <tr className="fade" key={i} style={{ "--d": i * 0.07 + "s" }}><td>{f.ip || "?"}</td><td>{f.status}</td><td><code>{f.request}</code></td></tr>)}
+              </tbody></table></div>
+            </Card>
+          )}
+          {d.samples.length > 0 && (
+            <Card>
+              <h2>All flagged requests</h2>
+              <div className="tablewrap"><table><thead><tr><th>Score</th><th>IP</th><th>Request</th></tr></thead><tbody>
+                {d.samples.map((f, i) => <tr className="fade" key={i} style={{ "--d": i * 0.05 + "s" }}><td style={{ color: VERDICT[f.verdict].color, fontWeight: 700 }}>{f.score}</td><td>{f.ip || "?"}</td><td><code>{f.request}</code></td></tr>)}
+              </tbody></table></div>
+            </Card>
+          )}
+          <p className="mute">{d.note}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScanTab({ call, setThreat }) {
+  const [target, setTarget] = useState("");
+  const [ports, setPorts] = useState("");
+  const [auth, setAuth] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [d, setD] = useState(null);
+  const run = async () => {
+    setBusy(true); setD(null);
+    try { const r = await call("/api/scan", { target, ports: ports || null, authorized: auth }); setD(r); setThreat("clean"); }
+    catch (e) { /* toast */ }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="page">
+      <Card>
+        <div className="radarBox">
+          {busy ? <Radar /> : null}
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <h2>Find web services on your network</h2>
+            <p className="sub">Nmap lists open ports and page titles. It doesn't send attack payloads. Only private addresses are allowed, and only scan systems you own or have written permission to test.</p>
+            <div className="row" style={{ marginTop: 0 }}>
+              <input className="field" style={{ flex: 2, minWidth: 190 }} value={target} onChange={(e) => setTarget(e.target.value)} placeholder="127.0.0.1 or 192.168.1.0/24" aria-label="Target" />
+              <input className="field" style={{ flex: 1, minWidth: 150 }} value={ports} onChange={(e) => setPorts(e.target.value)} placeholder="Ports (default: web ports)" aria-label="Ports" />
+            </div>
+            <div className="row">
+              <label className="switch"><input type="checkbox" checked={auth} onChange={(e) => setAuth(e.target.checked)} /><span className="tr" />I own this target or have permission to scan it</label>
+            </div>
+            <div className="row">
+              <button className={"btn" + (busy ? " busy" : "")} onClick={run} disabled={busy || !target.trim()}>{busy ? "Scanning" : "Run scan"}</button>
+              {busy && <span className="hint">Nmap can take up to a minute.</span>}
+            </div>
+          </div>
+        </div>
+      </Card>
+      {d && !d.hosts.length && <Card><div className="empty">No open ports found on {d.target}. Check the port list, or that the service is running.</div></Card>}
+      {d && d.hosts.map((h, i) => (
+        <Card key={h.address} className="host" style={{ "--d": i * 0.1 + "s" }}>
+          <div className="aihead">
+            <h2 style={{ margin: 0 }}>{h.address}</h2>
+            {h.hostname && <span className="tag">{h.hostname}</span>}
+            <span className="tag" style={{ borderColor: "rgba(94,234,212,.5)" }}>{h.web_services} web service{h.web_services === 1 ? "" : "s"}</span>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {h.ports.map((p) => (
+              <span key={p.port} className={"port" + (p.is_web ? " web" : "")}>
+                <em>{p.port}/{p.protocol}</em><b>{p.service || "unknown"}</b>
+                {p.product && <span className="mute">{p.product}</span>}
+                {p.http_title && <span>“{p.http_title}”</span>}
+              </span>
+            ))}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function HistoryTab({ call }) {
+  const [rows, setRows] = useState(null);
+  const [stats, setStats] = useState(null);
+  const load = async () => {
+    try { const [r, s] = await Promise.all([call("/api/history"), call("/api/stats")]); setRows(r); setStats(s); }
+    catch (e) { setRows([]); }
+  };
+  useEffect(() => { load(); }, []);
+  const bv = (stats && stats.by_verdict) || {};
+  const max = Math.max(1, ...Object.values(bv));
+  return (
+    <div className="page">
+      {stats && (
+        <div className="stats">
+          <Stat label="inputs checked" value={stats.total_checks} />
+          <Stat label="malicious" value={bv.malicious || 0} color="#ff4d6d" delay={0.08} />
+          <Stat label="network scans" value={stats.scans_run} delay={0.16} />
+        </div>
+      )}
+      {stats && stats.total_checks > 0 && (
+        <Card>
+          <h2>Verdicts so far</h2>
+          {Object.keys(VERDICT).map((k) => <HBar key={k} label={VERDICT[k].label} value={bv[k] || 0} max={max} color={VERDICT[k].color} />)}
+        </Card>
+      )}
+      <Card>
+        <div className="aihead"><h2 style={{ margin: 0 }}>Recent checks</h2><span className="grow" /><button className="chip" onClick={load}>Refresh</button></div>
+        {rows && rows.length === 0 && <div className="empty">Nothing here yet. Check an input on the first tab and it will show up.</div>}
+        {rows && rows.length > 0 && (
+          <div className="tablewrap"><table><thead><tr><th>Time</th><th>Verdict</th><th>Score</th><th>Input</th></tr></thead><tbody>
+            {rows.map((r, i) => (
+              <tr className="fade" key={r.id} style={{ "--d": Math.min(i, 14) * 0.04 + "s" }}>
+                <td className="mute">{r.ts.replace("T", " ").slice(5, 19)}</td>
+                <td style={{ color: VERDICT[r.verdict].color, fontWeight: 600 }}>{VERDICT[r.verdict].label}</td>
+                <td>{r.score}</td><td><code>{r.payload.slice(0, 110)}</code></td>
+              </tr>
+            ))}
+          </tbody></table></div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ---------- app ---------- */
+function App() {
+  const [tab, setTab] = useState("analyze");
+  const [threat, setThreat] = useState(null);
+  const [health, setHealth] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const [key, setKey] = useState(() => { try { return sessionStorage.getItem("sqli_key") || ""; } catch (e) { return ""; } });
+
+  useEffect(() => { fetch("/api/health").then((r) => r.json()).then(setHealth).catch(() => setHealth({})); }, []);
+  const onKey = (v) => { setKey(v); try { sessionStorage.setItem("sqli_key", v); } catch (e) { /* storage blocked */ } };
+
+  const toast = (msg) => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t, { id, msg }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
+  };
+  const call = async (path, body) => {
+    try { return await api(path, body, key); }
+    catch (e) { toast(e.message); throw e; }
+  };
+
+  const tabs = [
+    { id: "analyze", label: "Check input" }, { id: "logs", label: "Scan logs" },
+    { id: "scan", label: "Network scan" }, { id: "history", label: "History" },
+  ];
+  const h = health || {};
+  return (
+    <div className="wrap">
+      <Background threat={threat} />
+      <header className="top">
+        <div className="logo">
+          <svg viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <path d="M20 3 34 8v11c0 9-6 15.5-14 18C12 34.500 6 28 6 19V8z" stroke="#a78bfa" strokeWidth="2.200" />
+            <path d="M14 20.500l4 4 8-9" stroke="#5eead4" strokeWidth="2.600" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <h1><span data-t="SQLi Detector">SQLi Detector</span></h1>
+        </div>
+        <span className="grow" />
+        <span className={"pill" + (h.nmap_installed ? " on" : "")}><i />Nmap {health ? (h.nmap_installed ? "ready" : "not installed") : "…"}</span>
+        <input className="key" type="password" value={key} onChange={(e) => onKey(e.target.value)} placeholder="API key (if set)" aria-label="API key" />
+      </header>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} />
+      <main key={tab}>
+        {tab === "analyze" && <AnalyzeTab call={call} setThreat={setThreat} />}
+        {tab === "logs" && <LogsTab call={call} setThreat={setThreat} />}
+        {tab === "scan" && <ScanTab call={call} setThreat={setThreat} />}
+        {tab === "history" && <HistoryTab call={call} />}
+      </main>
+      <div className="toasts" role="status" aria-live="polite">
+        {toasts.map((t) => <div key={t.id} className="toast">{t.msg}</div>)}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
