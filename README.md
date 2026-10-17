@@ -1,6 +1,6 @@
 # SQLi Detector
 
-Python/FastAPI backend that detects SQL injection attempts in user input and web-server logs, with an optional Gemini second opinion and Nmap-based web-service discovery for your own network.
+Python/FastAPI backend that detects SQL injection attempts in user input and web-server logs, with an optional AI second opinion and Nmap-based web-service discovery for your own network.
 
 ## How it works
 
@@ -42,14 +42,12 @@ Open http://127.0.0.1:8000 for the UI, http://127.0.0.1:8000/docs for the API do
 | POST | `/api/logs/analyze` | `{"log_text": "..."}` → flagged requests, top IPs, top rules |
 | POST | `/api/scan` | `{"target": "192.168.1.0/24", "ports": "80,8000-8100", "authorized": true}` |
 | GET | `/api/history`, `/api/stats` | stored detections (SQLite) |
-| GET | `/api/health` | Gemini / nmap availability |
+| GET | `/api/health` | AI / nmap availability |
 
 ```bash
 curl -s localhost:8000/api/analyze -H 'content-type: application/json' \
   -d '{"payload":"1 UNION SELECT username,password FROM users"}'
 ```
-
-Set `API_KEY` in `.env` to require an `X-API-Key` header. Requests are rate limited per IP (`RATE_LIMIT_PER_MIN`) to protect your free Gemini quota.
 
 ## Project layout
 
