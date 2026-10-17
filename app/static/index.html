@@ -180,6 +180,20 @@
   .port.web { border-color:rgba(94,234,212,.5); box-shadow:0 0 16px rgba(94,234,212,.18); }
   .port em { font-style:normal; font-family:var(--mono); color:var(--uv); }
 
+  /* nmap setup guide */
+  .setup ol { list-style:none; counter-reset:step; padding:0; margin:16px 0 0; display:grid; gap:18px; }
+  .setup li { counter-increment:step; display:grid; grid-template-columns:30px 1fr; gap:12px; align-items:start; }
+  .setup li::before { content:counter(step); width:28px; height:28px; border-radius:50%; display:grid; place-items:center; font-weight:800; font-size:13px; background:rgba(124,58,237,.35); box-shadow:inset 0 0 0 1px rgba(167,139,250,.55); }
+  .setup li b { display:block; margin:3px 0 7px; }
+  .setup li p { margin:0 0 8px; }
+  .codeblock { position:relative; border:1px solid var(--line); border-radius:10px; background:rgba(5,5,12,.78); margin-bottom:6px; }
+  .codeblock pre { margin:0; padding:12px 78px 12px 14px; font-family:var(--mono); font-size:12.5px; line-height:1.75; overflow-x:auto; white-space:pre; color:#d8d3f5; }
+  .codeblock .copy { position:absolute; top:8px; right:8px; border:1px solid var(--line); background:rgba(167,139,250,.12); color:var(--text); border-radius:8px; padding:3px 11px; font-size:12.5px; cursor:pointer; transition:background .2s, border-color .2s; }
+  .codeblock .copy:hover { background:rgba(167,139,250,.28); border-color:var(--uv); }
+  .seg { display:inline-flex; padding:3px; gap:2px; border:1px solid var(--line); border-radius:10px; background:rgba(8,8,18,.6); }
+  .seg button { border:0; background:none; color:var(--mute); padding:5px 14px; border-radius:7px; cursor:pointer; font-weight:600; transition:background .2s, color .2s; }
+  .seg button.on { background:rgba(124,58,237,.5); color:#fff; }
+
   /* toasts */
   .toasts { position:fixed; right:16px; bottom:16px; z-index:20; display:grid; gap:10px; max-width:min(420px, calc(100vw - 32px)); }
   .toast { padding:12px 16px; border-radius:12px; background:rgba(30,12,22,.95); border:1px solid rgba(255,77,109,.55); box-shadow:0 10px 40px rgba(0,0,0,.5); animation:toastIn .4s cubic-bezier(.3,1.4,.5,1) both; font-size:14px; }
@@ -610,7 +624,79 @@ function LogsTab({ call, setThreat }) {
   );
 }
 
-function ScanTab({ call, setThreat }) {
+function CodeBlock({ text }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch (e) { /* clipboard blocked: the text can still be selected by hand */ }
+  };
+  return (
+    <div className="codeblock">
+      <button className="copy" onClick={copy} aria-label="Copy commands">{copied ? "Copied" : "Copy"}</button>
+      <pre>{text}</pre>
+    </div>
+  );
+}
+
+const REPO_URL = "https://github.com/XNikhil44/SQL_INJECTION_DETECTOR.git";
+const REPO_DIR = "SQL_INJECTION_DETECTOR";
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "::1"];
+
+/* shown instead of the scan form when the server has no Nmap (always the case on Vercel) */
+function NmapSetup() {
+  const [os, setOs] = useState(/Mac|Linux/i.test(navigator.platform || "") ? "unix" : "win");
+  const hosted = !LOCAL_HOSTS.includes(window.location.hostname);
+  const win = os === "win";
+  const install = win ? "winget install Insecure.Nmap" : "# macOS\nbrew install nmap\n\n# Ubuntu / Debian\nsudo apt install nmap";
+  const run = "python -m uvicorn app.main:app --reload";
+  const fullSetup = [
+    "git clone " + REPO_URL, "cd " + REPO_DIR,
+    win ? "python -m venv .venv" : "python3 -m venv .venv",
+    win ? ".venv\\Scripts\\Activate.ps1" : "source .venv/bin/activate",
+    "pip install -r requirements.txt", run,
+  ].join("\n");
+  return (
+    <Card className="setup">
+      <h2>{hosted ? "Network scan runs on your own computer" : "Nmap isn't installed on this computer"}</h2>
+      <p className="sub">
+        {hosted
+          ? "This site runs on a cloud server. It can't reach your home or college network, and Nmap can't be installed here. Run the app on your computer to scan your own network."
+          : "Install Nmap, then restart the server so it can find it."}
+      </p>
+      <div className="seg" role="group" aria-label="Operating system">
+        <button className={win ? "on" : ""} onClick={() => setOs("win")}>Windows</button>
+        <button className={!win ? "on" : ""} onClick={() => setOs("unix")}>macOS / Linux</button>
+      </div>
+      <ol>
+        <li><div>
+          <b>Install Nmap</b>
+          <CodeBlock text={install} />
+          {win && <p className="hint">Close and reopen the terminal afterwards. If “nmap” is still not found, run <code>{"$env:Path += \";C:\\Program Files (x86)\\Nmap\""}</code> in that terminal.</p>}
+        </div></li>
+        {hosted ? (
+          <li><div>
+            <b>Get the app and start it</b>
+            <CodeBlock text={fullSetup} />
+            <p className="hint">Needs Python and Git. If you already have the project folder, run only the last line from inside it.</p>
+          </div></li>
+        ) : (
+          <li><div>
+            <b>Restart the server in a new terminal</b>
+            <CodeBlock text={(win ? ".venv\\Scripts\\Activate.ps1\n" : "source .venv/bin/activate\n") + run} />
+          </div></li>
+        )}
+        <li><div>
+          <b>{hosted ? "Open the local copy" : "Check again"}</b>
+          {hosted
+            ? <p className="sub" style={{ margin: 0 }}>Go to <code>http://127.0.0.1:8000</code> and open Network scan. Try <code>127.0.0.1</code> first, then your own network such as <code>192.168.1.0/24</code>.</p>
+            : <div className="row" style={{ marginTop: 0 }}><button className="btn" onClick={() => window.location.reload()}>Reload this page</button></div>}
+        </div></li>
+      </ol>
+    </Card>
+  );
+}
+
+function ScanTab({ call, setThreat, nmap }) {
   const [target, setTarget] = useState("");
   const [ports, setPorts] = useState("");
   const [auth, setAuth] = useState(false);
@@ -622,6 +708,7 @@ function ScanTab({ call, setThreat }) {
     catch (e) { /* toast */ }
     finally { setBusy(false); }
   };
+  if (nmap === false) return <div className="page"><NmapSetup /></div>;
   return (
     <div className="page">
       <Card>
@@ -756,7 +843,7 @@ function App() {
       <main key={tab}>
         {tab === "analyze" && <AnalyzeTab call={call} setThreat={setThreat} />}
         {tab === "logs" && <LogsTab call={call} setThreat={setThreat} />}
-        {tab === "scan" && <ScanTab call={call} setThreat={setThreat} />}
+        {tab === "scan" && <ScanTab call={call} setThreat={setThreat} nmap={health && health.status === "ok" ? !!h.nmap_installed : null} />}
         {tab === "history" && <HistoryTab call={call} />}
       </main>
       <div className="toasts" role="status" aria-live="polite">
