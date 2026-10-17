@@ -7,17 +7,32 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import ai, db, scanner
-from .config import get_settings
-from .detector import DetectionResult, analyze, combine_with_ai
-from .logparser import analyze_log
-from .schemas import (
-    AnalyzeRequest,
-    AnalyzeResponse,
-    BatchRequest,
-    LogRequest,
-    ScanRequest,
-)
+try:
+    from . import ai, db, scanner
+    from .config import get_settings
+    from .detector import DetectionResult, analyze, combine_with_ai
+    from .logparser import analyze_log
+    from .schemas import (
+        AnalyzeRequest,
+        AnalyzeResponse,
+        BatchRequest,
+        LogRequest,
+        ScanRequest,
+    )
+except ImportError:
+    # Some serverless runtimes (e.g. Vercel) load this file by path, not as the "app.main"
+    # package module, so relative imports fail. Absolute imports work from the project root.
+    from app import ai, db, scanner
+    from app.config import get_settings
+    from app.detector import DetectionResult, analyze, combine_with_ai
+    from app.logparser import analyze_log
+    from app.schemas import (
+        AnalyzeRequest,
+        AnalyzeResponse,
+        BatchRequest,
+        LogRequest,
+        ScanRequest,
+    )
 
 STATIC_DIR = Path(__file__).parent / "static"
 
